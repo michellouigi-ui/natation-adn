@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#081e38" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Natation ADN" />
+  <title>Natation ADN 2026–2027</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100dvh; overflow: hidden; }
+    body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #f0f5fb; }
+    input, textarea, select, button { font-family: inherit; }
+    input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module">
+    import * as React from 'https://esm.sh/react@18.2.0';
+    import * as ReactDOM from 'https://esm.sh/react-dom@18.2.0';
+    import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
+
+    const { useState, useEffect, useCallback, useRef, createElement: h } = React;
+    const { createRoot } = ReactDOM;
+
+    // ── Supabase ──────────────────────────────────────────────────────────────
+    const supabase = createClient(
+      'https://srpngmfdvpvavmrmhqgg.supabase.co',
+      'sb_publishable_o-4fiwkUZlHJrN2-FhC6SQ_4sPlzkCz'
+    );
+
+    // ── Constants ─────────────────────────────────────────────────────────────
+    const GROUPES = [
+      { id: 'avenir1',   label: 'Avenirs 1',  color: '#1a6db5' },
+      { id: 'avenir2',   label: 'Avenirs 2',  color: '#27ae60' },
+      { id: 'benjamins', label: 'Benjamins',  color: '#e67e22' },
+      { id: 'minimes',   label: 'Minimes',    color: '#8e44ad' },
+      { id: 'gcc',       label: 'GCC',        color: '#c0392b' },
+      { id: 'caf',       label: 'CAF',        color: '#16a085' },
+    ];
+    const NAGES = ['Crawl','Dos','Brasse','Papillon','4 Nages'];
+    const ZONES = ['Z1','Z2','Z3','Z4','Z5'];
+    const TYPES_EXO = ['NC','Éducatif','Jambes','Flottaison'];
+    const SEANCE_DUREE_MIN = 120;
+    const NAGE_COLORS = { Crawl:'#2980c9', Dos:'#27ae60', Brasse:'#e67e22', Papillon:'#8e44ad', '4 Nages':'#c0392b' };
+    const ZONE_COLORS = { Z1:'#2196f3', Z2:'#4caf50', Z3:'#ff9800', Z4:'#e53935', Z5:'#212121' };
+    const TYPE_COLORS = { NC:'#3498db', 'Éducatif':'#9b59b6', Jambes:'#27ae60' };
+
+    // ── Date helpers ──────────────────────────────────────────────────────────
+    function getMonday(n=0) { const d=new Date(2026,8,7); d.setDate(d.getDate()+n*7); return d; }
+    function getSunday(m) { const d=new Date(m); d.setDate(d.getDate()+6); return d; }
+    function fmtS(d) { return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}); }
+    function fmtF(d) { return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'}); }
+    function mKey(d) { return d.toLocaleDateString('fr-FR',{month:'long',year:'numeric'}); }
+    function mLbl(d) { return d.toLocaleDateString('fr-FR',{month:'long',year:'numeric'}).replace(/^./,c=>c.toUpperCase()); }
+
+    const WEEKS = Array.from({length:43},(_,i)=>{
+      const mon=getMonday(i), sun=getSunday(mon);
+      return { num:i+1, label:`S${String(i+1).padStart(2,'0')}`, mon, sun, mk:mKey(mon), dr:`${fmtS(mon)} → ${fmtS(sun)}` };
+    });
+    const MONTHS=[], MM={};
+    WEEKS.forEach(w=>{
+      if(!MM[w.mk]){ MM[w.mk]={key:w.mk,label:mLbl(w.mon),weeks:[]}; MONTHS.push(MM[w.mk]); }
+      MM[w.mk].weeks.push(w);
+    });
+
+    // ── Factories ─────────────────────────────────────────────────────────────
+    const mkExo = () => ({id:Math.random().toString(36).slice(2), desc:'', nage:'', zone:'', type:'', sets:'', distance:'', duree:''});
+    const mkSeance = n => ({id:Math.random().toString(36).slice(2), titre:`Séance ${n}`, exercices:[mkExo()], notes:''});
+    const mkWeek = () => ({objectifs:'', bilan:'', seances:[mkSeance(1),mkSeance(2),mkSeance(3)]});
+    const mkGroupData = () => Array.from({length:43}, mkWeek);
+
+    // ── Calc ──────────────────────────────────────────────────────────────────
+    function calcDist(se) { return se.exercices.reduce((s,e)=>e.type==='Flottaison'?s:s+(parseInt(e.sets)||1)*(parseInt(e.distance)||0),0); }
+    function calcWeekDist(wd) { return wd.seances.reduce((s,se)=>s+calcDist(se),0); }
+    function countSeances(wdList) { return wdList.reduce((s,wd)=>s+wd.seances.filter(se=>se.exercices.some(e=>e.distance||e.duree)).length,0); }
+    function aggregate(wdList) {
+      const byNage={},byZone={},byType={};
+      let totalDist=0,exoCount=0,flottMin=0,seanceMin=0;
+      wdList.forEach(wd=>{
+        wd.seances.forEach(se=>{
+          if(se.exercices.some(e=>e.distance||e.duree)) seanceMin+=SEANCE_DUREE_MIN;
+          se.exercices.forEach(e=>{
+            if(e.type==='Flottaison'){ flottMin+=(parseInt(e.sets)||1)*(parseInt(e.duree)||0); return; }
+            const d=(parseInt(e.sets)||1)*(parseInt(e.distance)||0); if(!d) return;
+            totalDist+=d; exoCount++;
+            if(e.nage) byNage[e.nage]=(byNage[e.nage]||0)+d;
+            if(e.zone) byZone[e.zone]=(byZone[e.zone]||0)+d;
+            if(e.type) byType[e.type]=(byType[e.type]||0)+d;
+          });
+        });
+      });
+      return { byNage,byZone,byType,totalDist,exoCount,flottMin,flottPct:seanceMin>0?(flottMin/seanceMin)*100:0,seanceMin,nbSeances:countSeances(wdList) };
+    }
+    function shadeColor(hex,pct) {
+      const n=parseInt(hex.slice(1),16);
+      return `rgb(${Math.round(Math.min(255,Math.max(0,(n>>16)+pct*2.55)))},${Math.round(Math.min(255,Math.max(0,((n>>8)&0xff)+pct*2.55)))},${Math.round(Math.min(255,Math.max(0,(n&0xff)+pct*2.55)))})`;
+    }
+
+    // ── Styles ────────────────────────────────────────────────────────────────
+    const sInp = { padding:'7px 8px', border:'1px solid #dce8f4', borderRadius:6, fontSize:14, color:'#2d4a6a', outline:'none', width:'100%', boxSizing:'border-box', background:'#fff' };
+    const sLabel = { fontSize:10, fontWeight:700, color:'#7a9ab8', textTransform:'uppercase', letterSpacing:.4, marginBottom:3 };
+    const sNav = { background:'#fff', border:'1px solid #dce8f4', borderRadius:8, cursor:'pointer', width:34, height:34, fontSize:18, color:'#1a5f9e', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 };
+
+    // ── Donut ─────────────────────────────────────────────────────────────────
+    function Donut({data,colors,unit='m'}) {
+      const entries=Object.entries(data).filter(([,v])=>v>0);
+      const total=entries.reduce((s,[,v])=>s+v,0);
+      if(!total) return h('div',{style:{textAlign:'center',color:'#bbc',fontSize:12,padding:'24px 0'}},'Aucune donnée');
+      const R=52,cx=66,cy=66,sw=20; let cum=-90;
+      const toRad=a=>a*Math.PI/180;
+      const arc=(sa,ea)=>{
+        const x1=cx+R*Math.cos(toRad(sa)),y1=cy+R*Math.sin(toRad(sa));
+        const x2=cx+R*Math.cos(toRad(ea)),y2=cy+R*Math.sin(toRad(ea));
+        return `M ${x1} ${y1} A ${R} ${R} 0 ${ea-sa>180?1:0} 1 ${x2} ${y2}`;
+      };
+      const slices=entries.map(([key,val])=>{ const angle=(val/total)*360,sa=cum; cum+=angle; return {key,val,pct:val/total,sa,angle}; });
+      return h('div',{style:{display:'flex',alignItems:'center',gap:12}},
+        h('svg',{width:132,height:132,style:{flexShrink:0}},
+          h('circle',{cx,cy,r:R,fill:'none',stroke:'#eef2f7',strokeWidth:sw}),
+          ...slices.map(s=>h('path',{key:s.key,d:arc(s.sa,s.sa+s.angle),fill:'none',stroke:colors[s.key]||'#aaa',strokeWidth:sw,strokeLinecap:'butt'})),
+          h('text',{x:cx,y:cy-5,textAnchor:'middle',fontSize:'12',fontWeight:'800',fill:'#0a2e52'},total>9999?`${(total/1000).toFixed(1)}k`:total.toLocaleString('fr-FR')),
+          h('text',{x:cx,y:cy+9,textAnchor:'middle',fontSize:'9',fill:'#7a9ab8'},unit)
+        ),
+        h('div',{style:{flex:1}},
+          slices.map(s=>h('div',{key:s.key,style:{marginBottom:7}},
+            h('div',{style:{display:'flex',alignItems:'center',gap:6,marginBottom:2}},
+              h('div',{style:{width:9,height:9,borderRadius:2,background:colors[s.key]||'#aaa',flexShrink:0}}),
+              h('span',{style:{fontSize:11,fontWeight:600,color:'#2d4a6a',flex:1}},s.key),
+              h('span',{style:{fontSize:11,color:'#5a7a99'}},(s.pct*100).toFixed(1)+'%')
+            ),
+            h('div',{style:{height:5,background:'#eef2f7',borderRadius:3}},
+              h('div',{style:{height:'100%',borderRadius:3,background:colors[s.key]||'#aaa',width:`${s.pct*100}%`}})
+            ),
+            h('div',{style:{fontSize:10,color:'#9ab',marginTop:1}},s.val.toLocaleString('fr-FR')+' '+unit)
+          ))
+        )
+      );
+    }
+
+    function DistBar({items,color='#1a6db5'}) {
+      const max=Math.max(...items.map(i=>i.dist),1);
+      return h('div',{style:{display:'flex',flexDirection:'column',gap:6}},
+        items.map((item,i)=>h('div',{key:i,style:{display:'grid',gridTemplateColumns:'40px 1fr 64px',alignItems:'center',gap:8}},
+          h('span',{style:{fontSize:11,fontWeight:700,color:'#5a7a99',textAlign:'right'}},item.label),
+          h('div',{style:{height:14,background:'#eef2f7',borderRadius:4,overflow:'hidden'}},
+            h('div',{style:{height:'100%',borderRadius:4,background:color,width:`${(item.dist/max)*100}%`}})
+          ),
+          h('span',{style:{fontSize:11,color:item.dist>0?'#1a5f9e':'#bbc',fontWeight:item.dist>0?700:400,textAlign:'right'}},
+            item.dist>0?`${(item.dist/1000).toFixed(2)} km`:'–'
+          )
+        ))
+      );
+    }
+
+    function DistTotalCard({dist,nbSeances,subtitle,accentColor}) {
+      const dark=shadeColor(accentColor,-25);
+      return h('div',{style:{background:`linear-gradient(135deg,${dark},${accentColor})`,borderRadius:12,padding:'20px 18px',boxShadow:'0 2px 10px rgba(14,60,100,.15)',display:'flex',flexDirection:'column',justifyContent:'center',minWidth:180}},
+        h('div',{style:{fontSize:10,color:'rgba(255,255,255,.65)',fontWeight:700,textTransform:'uppercase',letterSpacing:1,marginBottom:4}},'Distance totale'),
+        h('div',{style:{fontSize:28,fontWeight:800,color:'#fff',lineHeight:1}},dist>0?(dist/1000).toFixed(2):'–'),
+        dist>0&&h('div',{style:{fontSize:13,color:'rgba(255,255,255,.8)',marginTop:2}},'km'),
+        h('div',{style:{marginTop:10,paddingTop:10,borderTop:'1px solid rgba(255,255,255,.2)',display:'flex',alignItems:'center',gap:6}},
+          h('span',{style:{fontSize:20,fontWeight:800,color:'#fff'}},nbSeances||'–'),
+          h('span',{style:{fontSize:11,color:'rgba(255,255,255,.7)',lineHeight:1.3}},`séance${nbSeances!==1?'s':''}\ncomplète${nbSeances!==1?'s':''}`)
+        ),
+        h('div',{style:{fontSize:11,color:'rgba(255,255,255,.5)',marginTop:6}},subtitle)
+      );
+    }
+
+    function StatsPanel({stats}) {
+      const {byNage,byZone,byType,totalDist,flottMin,flottPct,seanceMin}=stats;
+      if(!totalDist&&!flottMin) return h('div',{style:{textAlign:'center',color:'#bbc',fontSize:13,padding:'50px 0'}},'Aucune donnée renseignée');
+      return h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:14}},
+        ...[['🏊 Style de nage',byNage,NAGE_COLORS,'m'],['⚡ Zone d\'intensité',byZone,ZONE_COLORS,'m'],['📋 Type d\'exercice',byType,TYPE_COLORS,'m']].map(([title,data,colors,unit])=>
+          h('div',{key:title,style:{background:'#fff',borderRadius:12,padding:'16px 14px',boxShadow:'0 2px 10px rgba(14,60,100,.07)'}},
+            h('div',{style:{fontWeight:700,fontSize:11,color:'#0a2e52',marginBottom:12,textTransform:'uppercase',letterSpacing:.5}},title),
+            h(Donut,{data,colors,unit})
+          )
+        ),
+        h('div',{style:{background:'#fff',borderRadius:12,padding:'16px 14px',boxShadow:'0 2px 10px rgba(14,60,100,.07)'}},
+          h('div',{style:{fontWeight:700,fontSize:11,color:'#0a2e52',marginBottom:12,textTransform:'uppercase',letterSpacing:.5}},'🛟 Flottaison'),
+          flottMin===0?h('div',{style:{color:'#bbc',fontSize:12,textAlign:'center',marginTop:24}},'Aucune donnée'):
+          h(React.Fragment,null,
+            h('div',{style:{fontSize:30,fontWeight:800,color:'#e67e22',lineHeight:1}},flottPct.toFixed(1)+'%'),
+            h('div',{style:{fontSize:11,color:'#7a94ab',marginBottom:14,marginTop:2}},'des séances (base 2h)'),
+            h('div',{style:{height:12,background:'#fdebd0',borderRadius:6,overflow:'hidden',marginBottom:8}},
+              h('div',{style:{height:'100%',background:'linear-gradient(90deg,#e67e22,#f39c12)',width:`${Math.min(flottPct,100)}%`,borderRadius:6}})
+            ),
+            h('div',{style:{display:'flex',justifyContent:'space-between'}},
+              h('span',{style:{fontSize:10,color:'#9ab'}},flottMin+' min flott.'),
+              h('span',{style:{fontSize:10,color:'#9ab'}},seanceMin+' min total')
+            )
+          )
+        )
+      );
+    }
+
+    function ExoRow({exo,onChange,onDelete}) {
+      const upd=(k,v)=>onChange({...exo,[k]:v});
+      const isFlot=exo.type==='Flottaison';
+      const setsN=parseInt(exo.sets)||1;
+      const totalVal=isFlot?setsN*(parseInt(exo.duree)||0):setsN*(parseInt(exo.distance)||0);
+      const totalStr=totalVal>0?(isFlot?`${totalVal} min`:`${totalVal} m`):'–';
+      return h('div',{style:{borderBottom:'1px solid #edf2f7',paddingBottom:10,paddingTop:8}},
+        h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6,marginBottom:6}},
+          h('div',null,h('div',{style:sLabel},'Nage'),h('select',{style:sInp,value:exo.nage,onChange:e=>upd('nage',e.target.value)},h('option',{value:''},'–'),...NAGES.map(n=>h('option',{key:n},n)))),
+          h('div',null,h('div',{style:sLabel},'Zone'),h('select',{style:sInp,value:exo.zone,onChange:e=>upd('zone',e.target.value)},h('option',{value:''},'–'),...ZONES.map(z=>h('option',{key:z},z)))),
+          h('div',null,h('div',{style:sLabel},'Type'),h('select',{style:{...sInp,background:isFlot?'#fef3e2':'#fff',color:isFlot?'#c0392b':'#2d4a6a',fontWeight:isFlot?700:400},value:exo.type,onChange:e=>upd('type',e.target.value)},h('option',{value:''},'–'),...TYPES_EXO.map(t=>h('option',{key:t},t))))
+        ),
+        h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 32px',gap:6,marginBottom:6}},
+          h('div',null,h('div',{style:sLabel},'Séries'),h('input',{style:{...sInp,textAlign:'center'},placeholder:'x',value:exo.sets,onChange:e=>upd('sets',e.target.value),type:'number',min:'1'})),
+          h('div',null,
+            h('div',{style:sLabel},isFlot?'Durée (min)':'Distance (m)'),
+            isFlot?h('input',{style:{...sInp,textAlign:'center',background:'#fef3e2',color:'#c0392b',fontWeight:600},placeholder:'min',value:exo.duree,onChange:e=>upd('duree',e.target.value),type:'number',min:'0'}):
+            h('input',{style:{...sInp,textAlign:'center'},placeholder:'m',value:exo.distance,onChange:e=>upd('distance',e.target.value),type:'number',min:'0',step:'25'})
+          ),
+          h('div',null,h('div',{style:sLabel},'Total'),h('div',{style:{...sInp,textAlign:'center',fontWeight:700,color:totalVal>0?(isFlot?'#e67e22':'#1a5f9e'):'#c0ccd8',display:'flex',alignItems:'center',justifyContent:'center'}},totalStr)),
+          h('div',{style:{display:'flex',alignItems:'flex-end',paddingBottom:2}},h('button',{onClick:onDelete,style:{background:'none',border:'none',cursor:'pointer',color:'#c0ccd8',fontSize:16,padding:'4px',width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center'}},'✕'))
+        ),
+        h('input',{style:{...sInp,fontSize:12},placeholder:"Description de l'exercice…",value:exo.desc,onChange:e=>upd('desc',e.target.value)})
+      );
+    }
+
+    function SeanceCard({seance,onChange,onDelete,canDelete,accentColor}) {
+      const total=calcDist(seance);
+      const upd=(k,v)=>onChange({...seance,[k]:v});
+      const updExo=(i,e)=>{const ex=[...seance.exercices];ex[i]=e;upd('exercices',ex);};
+      const addExo=()=>upd('exercices',[...seance.exercices,mkExo()]);
+      const delExo=i=>{if(seance.exercices.length>1)upd('exercices',seance.exercices.filter((_,j)=>j!==i));};
+      const dark=shadeColor(accentColor,-20);
+      return h('div',{style:{background:'#fff',borderRadius:12,boxShadow:'0 2px 12px rgba(14,60,100,.07)',marginBottom:18,overflow:'hidden'}},
+        h('div',{style:{background:`linear-gradient(90deg,${dark},${accentColor})`,padding:'10px 16px',display:'flex',alignItems:'center',gap:10}},
+          h('span',{style:{fontSize:16}},'🏊'),
+          h('input',{style:{background:'transparent',border:'none',color:'#fff',fontWeight:700,fontSize:14,flex:1,outline:'none',minWidth:0},value:seance.titre,onChange:e=>upd('titre',e.target.value)}),
+          h('span',{style:{color:'rgba(255,255,255,.85)',fontWeight:700,fontSize:13,whiteSpace:'nowrap'}},total>0?`${total.toLocaleString('fr-FR')} m`:'–'),
+          canDelete&&h('button',{onClick:onDelete,style:{background:'rgba(255,255,255,.2)',border:'none',color:'#fff',borderRadius:6,cursor:'pointer',padding:'3px 9px',fontSize:11,flexShrink:0}},'✕')
+        ),
+        h('div',{style:{padding:'0 12px 8px'}},
+          seance.exercices.map((exo,i)=>h(ExoRow,{key:exo.id,exo,onChange:e=>updExo(i,e),onDelete:()=>delExo(i)})),
+          h('button',{onClick:addExo,style:{marginTop:10,background:'#eaf4ff',border:'1px dashed #7ab8e8',color:'#1a5f9e',borderRadius:7,cursor:'pointer',padding:'8px 14px',fontSize:13,fontWeight:600,width:'100%'}},'+ Exercice')
+        ),
+        h('div',{style:{padding:'6px 12px 12px',borderTop:'1px solid #edf2f7'}},
+          h('textarea',{style:{...sInp,width:'100%',resize:'vertical',minHeight:36,fontSize:12,boxSizing:'border-box'},placeholder:'Notes de séance…',value:seance.notes,onChange:e=>upd('notes',e.target.value)})
+        )
+      );
+    }
+
+    function MonthStats({data,accentColor}) {
+      const [activeMonth,setActiveMonth]=useState(0);
+      const month=MONTHS[activeMonth];
+      const monthData=month.weeks.map(w=>data[w.num-1]);
+      const stats=aggregate(monthData);
+      const weekItems=month.weeks.map(w=>({label:w.label,dist:calcWeekDist(data[w.num-1])}));
+      return h('div',null,
+        h('div',{style:{fontSize:20,fontWeight:800,color:'#0a2e52',marginBottom:16}},'📅 Statistiques par mois'),
+        h('div',{style:{display:'flex',flexWrap:'wrap',gap:6,marginBottom:20}},
+          MONTHS.map((m,i)=>h('button',{key:m.key,onClick:()=>setActiveMonth(i),style:{padding:'6px 12px',borderRadius:8,border:'none',cursor:'pointer',fontSize:12,fontWeight:600,background:activeMonth===i?accentColor:'#e8edf4',color:activeMonth===i?'#fff':'#5a7a99'}},m.label))
+        ),
+        h('div',{style:{display:'grid',gridTemplateColumns:'minmax(180px,220px) 1fr',gap:14,marginBottom:20}},
+          h(DistTotalCard,{dist:stats.totalDist,nbSeances:stats.nbSeances,subtitle:month.label,accentColor}),
+          h('div',{style:{background:'#fff',borderRadius:12,padding:'16px 18px',boxShadow:'0 2px 8px rgba(14,60,100,.07)'}},
+            h('div',{style:{fontWeight:700,fontSize:11,color:'#0a2e52',marginBottom:12,textTransform:'uppercase',letterSpacing:.5}},'Distance par semaine'),
+            h(DistBar,{items:weekItems,color:accentColor})
+          )
+        ),
+        h(StatsPanel,{stats})
+      );
+    }
+
+    function YearStats({data,accentColor}) {
+      const stats=aggregate(data);
+      const totalSaison=data.reduce((s,w)=>s+calcWeekDist(w),0);
+      const monthItems=MONTHS.map(m=>({label:m.label.split(' ')[0].slice(0,4).replace(/^./,c=>c.toUpperCase()),dist:m.weeks.reduce((s,w)=>s+calcWeekDist(data[w.num-1]),0)}));
+      return h('div',null,
+        h('div',{style:{fontSize:20,fontWeight:800,color:'#0a2e52',marginBottom:16}},'📊 Statistiques — Saison 2026–2027'),
+        h('div',{style:{display:'grid',gridTemplateColumns:'minmax(180px,220px) 1fr',gap:14,marginBottom:22}},
+          h(DistTotalCard,{dist:totalSaison,nbSeances:stats.nbSeances,subtitle:'Saison 2026–2027',accentColor}),
+          h('div',{style:{background:'#fff',borderRadius:12,padding:'16px 18px',boxShadow:'0 2px 8px rgba(14,60,100,.07)'}},
+            h('div',{style:{fontWeight:700,fontSize:11,color:'#0a2e52',marginBottom:12,textTransform:'uppercase',letterSpacing:.5}},'Distance par mois'),
+            h(DistBar,{items:monthItems,color:accentColor})
+          )
+        ),
+        h(StatsPanel,{stats})
+      );
+    }
+
+    function WeekView({data,setData,accentColor,groupLabel,saving}) {
+      const [activeWeek,setActiveWeek]=useState(0);
+      const [view,setView]=useState('week');
+      const [collapsed,setCollapsed]=useState(false);
+      const [search,setSearch]=useState('');
+      const week=WEEKS[activeWeek];
+      const wd=data[activeWeek];
+      const updWd=p=>setData(prev=>{const n=[...prev];n[activeWeek]={...n[activeWeek],...p};return n;});
+      const updSeance=(i,s)=>{const ss=[...wd.seances];ss[i]=s;updWd({seances:ss});};
+      const addSeance=()=>updWd({seances:[...wd.seances,mkSeance(wd.seances.length+1)]});
+      const delSeance=i=>updWd({seances:wd.seances.filter((_,j)=>j!==i)});
+      const totalSaison=data.reduce((s,w)=>s+calcWeekDist(w),0);
+      const filtered=WEEKS.filter(w=>w.label.toLowerCase().includes(search.toLowerCase())||w.mk.toLowerCase().includes(search.toLowerCase())||w.dr.includes(search));
+
+      return h('div',{style:{display:'flex',flex:1,position:'relative',minHeight:0,overflow:'hidden'}},
+        h('div',{style:{width:collapsed?0:168,minWidth:collapsed?0:168,background:'#0f3a62',display:'flex',flexDirection:'column',overflow:'hidden',transition:'width .25s ease, min-width .25s ease',flexShrink:0}},
+          h('div',{style:{width:168,display:'flex',flexDirection:'column',height:'100%'}},
+            h('div',{style:{padding:'10px 10px 6px',borderBottom:'1px solid rgba(255,255,255,.08)'}},
+              h('div',{style:{display:'flex',alignItems:'center',gap:6,marginBottom:8}},
+                h('div',{style:{width:8,height:8,borderRadius:'50%',background:accentColor}}),
+                h('span',{style:{color:'#fff',fontWeight:800,fontSize:13}},groupLabel),
+                saving&&h('span',{style:{fontSize:9,color:'rgba(255,255,255,.4)',marginLeft:'auto'}},'💾…')
+              ),
+              h('input',{style:{width:'100%',padding:'5px 8px',borderRadius:6,border:'none',background:'#1a5080',color:'#fff',fontSize:11,outline:'none',boxSizing:'border-box'},placeholder:'Rechercher…',value:search,onChange:e=>setSearch(e.target.value)})
+            ),
+            h('div',{style:{padding:'6px 6px 4px'}},
+              [['week','📅 Semaines'],['month','📅 Stats mois'],['year','📊 Stats saison']].map(([v,l])=>
+                h('button',{key:v,onClick:()=>setView(v),style:{display:'block',width:'100%',textAlign:'left',padding:'6px 8px',borderRadius:6,border:'none',cursor:'pointer',fontSize:11,fontWeight:600,marginBottom:2,background:view===v?accentColor:'transparent',color:view===v?'#fff':'#7ab3d0'}},l)
+              )
+            ),
+            view==='week'&&h('div',{style:{flex:1,overflowY:'auto'}},
+              filtered.map(w=>{
+                const idx=w.num-1,dist=calcWeekDist(data[idx]),active=idx===activeWeek;
+                return h('button',{key:w.num,onClick:()=>setActiveWeek(idx),style:{display:'block',width:'100%',textAlign:'left',padding:'6px 10px',border:'none',cursor:'pointer',background:active?accentColor:'transparent',borderLeft:active?'3px solid rgba(255,255,255,.6)':'3px solid transparent'}},
+                  h('div',{style:{color:active?'#fff':'#a0cce8',fontWeight:700,fontSize:11}},w.label),
+                  h('div',{style:{color:active?'rgba(255,255,255,.7)':'#4a7898',fontSize:9,marginTop:1}},w.dr),
+                  dist>0&&h('div',{style:{color:'rgba(255,255,255,.8)',fontSize:9,marginTop:1}},dist.toLocaleString('fr-FR')+' m')
+                );
+              })
+            ),
+            h('div',{style:{padding:'8px 10px',borderTop:'1px solid rgba(255,255,255,.1)',marginTop:'auto'}},
+              h('div',{style:{color:'rgba(255,255,255,.5)',fontSize:9,textTransform:'uppercase'}},'Total saison'),
+              h('div',{style:{color:'#5bc4f5',fontWeight:800,fontSize:14}},(totalSaison/1000).toFixed(1)+' km')
+            )
+          )
+        ),
+        h('button',{onClick:()=>setCollapsed(c=>!c),style:{position:'absolute',left:collapsed?0:168,top:'50%',transform:'translateY(-50%)',zIndex:30,width:20,height:48,background:'#0f3a62',border:'none',borderRadius:'0 8px 8px 0',cursor:'pointer',color:'rgba(255,255,255,.7)',fontSize:12,display:'flex',alignItems:'center',justifyContent:'center',transition:'left .25s ease',boxShadow:'2px 0 8px rgba(0,0,0,.2)'}},collapsed?'›':'‹'),
+        h('div',{style:{flex:1,padding:'20px 22px',overflowY:'auto'}},
+          view==='month'&&h(MonthStats,{data,accentColor}),
+          view==='year'&&h(YearStats,{data,accentColor}),
+          view==='week'&&h(React.Fragment,null,
+            h('div',{style:{display:'flex',alignItems:'center',gap:10,marginBottom:16}},
+              h('button',{onClick:()=>setActiveWeek(Math.max(0,activeWeek-1)),style:sNav},'‹'),
+              h('div',null,
+                h('div',{style:{fontSize:17,fontWeight:800,color:'#0a2e52'}},`Semaine ${week.num} `,h('span',{style:{color:'#1a85d6',fontWeight:400,fontSize:14}},'/ 43')),
+                h('div',{style:{fontSize:11,color:'#5a7a99'}},`${fmtF(week.mon)} → ${fmtF(week.sun)}`)
+              ),
+              h('button',{onClick:()=>setActiveWeek(Math.min(42,activeWeek+1)),style:sNav},'›'),
+              h('div',{style:{marginLeft:'auto',background:`linear-gradient(135deg,${shadeColor(accentColor,-25)},${accentColor})`,borderRadius:10,padding:'8px 16px',textAlign:'center'}},
+                h('div',{style:{fontSize:18,fontWeight:800,color:'#fff'}},calcWeekDist(wd).toLocaleString('fr-FR')+' m'),
+                h('div',{style:{fontSize:9,color:'rgba(255,255,255,.7)',fontWeight:600}},'TOTAL SEMAINE')
+              )
+            ),
+            h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:18}},
+              [['🎯 Objectifs','objectifs','Objectifs…'],['📝 Bilan','bilan','Bilan…']].map(([label,key,ph])=>
+                h('div',{key,style:{background:'#fff',borderRadius:10,padding:12,boxShadow:'0 1px 6px rgba(14,60,100,.06)'}},
+                  h('div',{style:{fontWeight:700,fontSize:11,color:'#0a2e52',marginBottom:5}},label),
+                  h('textarea',{style:{width:'100%',border:'1px solid #dce8f4',borderRadius:7,padding:'6px 9px',fontSize:12,color:'#2d4a6a',resize:'vertical',minHeight:48,outline:'none',boxSizing:'border-box'},value:wd[key],onChange:e=>updWd({[key]:e.target.value}),placeholder:ph})
+                )
+              )
+            ),
+            wd.seances.map((se,i)=>h(SeanceCard,{key:se.id,seance:se,onChange:s=>updSeance(i,s),onDelete:()=>delSeance(i),canDelete:wd.seances.length>1,accentColor})),
+            h('button',{onClick:addSeance,style:{display:'flex',alignItems:'center',gap:8,background:`linear-gradient(90deg,${shadeColor(accentColor,-20)},${accentColor})`,color:'#fff',border:'none',borderRadius:10,cursor:'pointer',padding:'10px 20px',fontWeight:700,fontSize:13,boxShadow:'0 2px 8px rgba(10,46,82,.2)'}},'+ Ajouter une séance')
+          )
+        )
+      );
+    }
+
+    function App() {
+      const [activeGroup,setActiveGroup]=useState(0);
+      const [allData,setAllData]=useState(()=>Object.fromEntries(GROUPES.map(g=>[g.id,mkGroupData()])));
+      const [menuOpen,setMenuOpen]=useState(false);
+      const [loaded,setLoaded]=useState(false);
+      const [saving,setSaving]=useState(false);
+      const saveTimer=useRef(null);
+      const group=GROUPES[activeGroup];
+
+      useEffect(()=>{
+        async function load() {
+          try {
+            const {data,error}=await supabase.from('Saison_data').select('Groupe_id, Semaine_index, Data');
+            if(error){ console.error('Load error:',error); setLoaded(true); return; }
+            if(data&&data.length>0) {
+              setAllData(prev=>{
+                const next={...prev};
+                data.forEach(row=>{
+                  if(!next[row.Groupe_id]) next[row.Groupe_id]=mkGroupData();
+                  const weeks=[...next[row.Groupe_id]];
+                  weeks[row.Semaine_index]=row.Data;
+                  next[row.Groupe_id]=weeks;
+                });
+                return next;
+              });
+            }
+          } catch(e){ console.error(e); }
+          setLoaded(true);
+        }
+        load();
+        const channel=supabase.channel('saison-realtime')
+          .on('postgres_changes',{event:'*',schema:'public',table:'Saison_data'},payload=>{
+            const row=payload.new; if(!row) return;
+            setAllData(prev=>{
+              const next={...prev};
+              if(!next[row.Groupe_id]) next[row.Groupe_id]=mkGroupData();
+              const weeks=[...next[row.Groupe_id]];
+              weeks[row.Semaine_index]=row.Data;
+              next[row.Groupe_id]=weeks;
+              return next;
+            });
+          }).subscribe();
+        return ()=>supabase.removeChannel(channel);
+      },[]);
+
+      const saveWeek=useCallback((groupeId,semaineIndex,weekData)=>{
+        setSaving(true);
+        clearTimeout(saveTimer.current);
+        saveTimer.current=setTimeout(async()=>{
+          try {
+            await supabase.from('Saison_data').upsert({Groupe_id:groupeId,Semaine_index:semaineIndex,Data:weekData},{onConflict:'Groupe_id,Semaine_index'});
+          } catch(e){ console.error('Save error:',e); }
+          setSaving(false);
+        },1500);
+      },[]);
+
+      const groupData=allData[group.id];
+      const setGroupData=useCallback((updater)=>{
+        setAllData(prev=>{
+          const oldGroup=prev[group.id];
+          const newGroup=typeof updater==='function'?updater(oldGroup):updater;
+          newGroup.forEach((w,i)=>{ if(JSON.stringify(w)!==JSON.stringify(oldGroup[i])) saveWeek(group.id,i,w); });
+          return {...prev,[group.id]:newGroup};
+        });
+      },[group.id,saveWeek]);
+
+      if(!loaded) return h('div',{style:{height:'100dvh',display:'flex',alignItems:'center',justifyContent:'center',background:'#081e38',flexDirection:'column',gap:16}},
+        h('div',{style:{fontSize:32}},'🏊'),
+        h('div',{style:{color:'#5bc4f5',fontWeight:700,fontSize:16}},'Chargement…')
+      );
+
+      return h('div',{style:{fontFamily:"'Inter',system-ui,sans-serif",background:'#f0f5fb',height:'100dvh',display:'flex',flexDirection:'column',overflow:'hidden'}},
+        h('header',{style:{background:'#081e38',display:'flex',alignItems:'center',padding:'0 14px',height:44,flexShrink:0,position:'relative',zIndex:50}},
+          h('span',{style:{fontSize:16,marginRight:10}},'🏊'),
+          h('button',{onClick:()=>setMenuOpen(o=>!o),style:{display:'flex',alignItems:'center',gap:8,background:menuOpen?'rgba(255,255,255,.15)':'rgba(255,255,255,.08)',border:'none',borderRadius:20,cursor:'pointer',padding:'6px 14px',color:'#fff',fontWeight:700,fontSize:13}},
+            h('div',{style:{width:8,height:8,borderRadius:'50%',background:group.color}}),
+            'Groupe ADN',
+            h('span',{style:{fontSize:10,opacity:.6,marginLeft:2}},menuOpen?'▲':'▼')
+          ),
+          h('div',{style:{marginLeft:10,background:group.color,borderRadius:20,padding:'4px 12px',fontSize:12,fontWeight:700,color:'#fff'}},group.label),
+          saving&&h('span',{style:{marginLeft:'auto',fontSize:10,color:'rgba(255,255,255,.35)'}},'Sauvegarde…'),
+          menuOpen&&h(React.Fragment,null,
+            h('div',{onClick:()=>setMenuOpen(false),style:{position:'fixed',inset:0,zIndex:40}}),
+            h('div',{style:{position:'absolute',top:48,left:14,zIndex:50,background:'#0d2d4a',borderRadius:14,overflow:'hidden',boxShadow:'0 8px 32px rgba(0,0,0,.4)',border:'1px solid rgba(255,255,255,.1)',minWidth:180}},
+              h('div',{style:{padding:'8px 12px 6px',fontSize:10,color:'rgba(255,255,255,.35)',textTransform:'uppercase',letterSpacing:1}},'Sélectionner un groupe'),
+              GROUPES.map((g,i)=>h('button',{key:g.id,onClick:()=>{setActiveGroup(i);setMenuOpen(false);},style:{display:'flex',alignItems:'center',gap:10,width:'100%',padding:'10px 14px',border:'none',cursor:'pointer',textAlign:'left',background:activeGroup===i?'rgba(255,255,255,.1)':'transparent',borderLeft:activeGroup===i?`3px solid ${g.color}`:'3px solid transparent'}},
+                h('div',{style:{width:10,height:10,borderRadius:'50%',background:g.color,flexShrink:0}}),
+                h('span',{style:{color:activeGroup===i?'#fff':'#a0c4de',fontWeight:activeGroup===i?700:500,fontSize:13}},g.label),
+                activeGroup===i&&h('span',{style:{marginLeft:'auto',fontSize:11,color:g.color}},'✓')
+              ))
+            )
+          )
+        ),
+        h('div',{style:{flex:1,display:'flex',overflow:'hidden',minHeight:0}},
+          h(WeekView,{key:group.id,data:groupData,setData:setGroupData,accentColor:group.color,groupLabel:group.label,saving})
+        )
+      );
+    }
+
+    createRoot(document.getElementById('root')).render(h(App,null));
+  </script>
+</body>
+</html>
