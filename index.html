@@ -372,6 +372,7 @@
       const [loaded,setLoaded]=useState(false);
       const [saving,setSaving]=useState(false);
       const saveTimer=useRef(null);
+      const pendingSaves=useRef({});
       const group=GROUPES[activeGroup];
 
       useEffect(()=>{
@@ -411,14 +412,40 @@
       },[]);
 
       const saveWeek=useCallback((groupeId,semaineIndex,weekData)=>{
+        const key=`${groupeId}::${semaineIndex}`;
+        pendingSaves.current[key]={Groupe_id:groupeId,Semaine_index:semaineIndex,Data:weekData};
         setSaving(true);
         clearTimeout(saveTimer.current);
         saveTimer.current=setTimeout(async()=>{
+          const rows=Object.values(pendingSaves.current);
+          pendingSaves.current={};
           try {
-            await supabase.from('Saison_data').upsert({Groupe_id:groupeId,Semaine_index:semaineIndex,Data:weekData},{onConflict:'Groupe_id,Semaine_index'});
+            await supabase.from('Saison_data').upsert(rows,{onConflict:'Groupe_id,Semaine_index'});
           } catch(e){ console.error('Save error:',e); }
           setSaving(false);
         },1500);
+      },[]);
+
+      useEffect(()=>{
+        const flushSaves=()=>{
+          clearTimeout(saveTimer.current);
+          const rows=Object.values(pendingSaves.current);
+          if(!rows.length) return;
+          pendingSaves.current={};
+          fetch('https://srpngmfdvpvavmrmhqgg.supabase.co/rest/v1/Saison_data?on_conflict=Groupe_id%2CSemaine_index',{
+            method:'POST',
+            headers:{'Content-Type':'application/json','apikey':'sb_publishable_o-4fiwkUZlHJrN2-FhC6SQ_4sPlzkCz','Authorization':'Bearer sb_publishable_o-4fiwkUZlHJrN2-FhC6SQ_4sPlzkCz','Prefer':'resolution=merge-duplicates,return=minimal'},
+            body:JSON.stringify(rows),
+            keepalive:true
+          });
+        };
+        const onVisibility=()=>{ if(document.visibilityState==='hidden') flushSaves(); };
+        window.addEventListener('pagehide',flushSaves);
+        document.addEventListener('visibilitychange',onVisibility);
+        return()=>{
+          window.removeEventListener('pagehide',flushSaves);
+          document.removeEventListener('visibilitychange',onVisibility);
+        };
       },[]);
 
       const groupData=allData[group.id];
