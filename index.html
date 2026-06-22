@@ -367,10 +367,14 @@
 
     function App() {
       const [activeGroup,setActiveGroup]=useState(0);
-      const [allData,setAllData]=useState(()=>Object.fromEntries(GROUPES.map(g=>[g.id,mkGroupData()])));
+      const [allData,setAllData]=useState(()=>{
+        try { const s=localStorage.getItem('natation-adn'); if(s) return JSON.parse(s); } catch(e){}
+        return Object.fromEntries(GROUPES.map(g=>[g.id,mkGroupData()]));
+      });
       const [menuOpen,setMenuOpen]=useState(false);
       const [loaded,setLoaded]=useState(false);
       const [saving,setSaving]=useState(false);
+      const [saveErr,setSaveErr]=useState(false);
       const saveTimer=useRef(null);
       const pendingSaves=useRef({});
       const group=GROUPES[activeGroup];
@@ -411,17 +415,25 @@
         return ()=>supabase.removeChannel(channel);
       },[]);
 
+      // Sauvegarde locale immédiate à chaque changement
+      useEffect(()=>{
+        if(!loaded) return;
+        try { localStorage.setItem('natation-adn',JSON.stringify(allData)); } catch(e){}
+      },[allData,loaded]);
+
       const saveWeek=useCallback((groupeId,semaineIndex,weekData)=>{
         const key=`${groupeId}::${semaineIndex}`;
         pendingSaves.current[key]={Groupe_id:groupeId,Semaine_index:semaineIndex,Data:weekData};
         setSaving(true);
+        setSaveErr(false);
         clearTimeout(saveTimer.current);
         saveTimer.current=setTimeout(async()=>{
           const rows=Object.values(pendingSaves.current);
           pendingSaves.current={};
           try {
-            await supabase.from('Saison_data').upsert(rows,{onConflict:'Groupe_id,Semaine_index'});
-          } catch(e){ console.error('Save error:',e); }
+            const {error}=await supabase.from('Saison_data').upsert(rows,{onConflict:'Groupe_id,Semaine_index'});
+            if(error) throw error;
+          } catch(e){ console.error('Supabase sync error:',e); setSaveErr(true); }
           setSaving(false);
         },1500);
       },[]);
@@ -472,7 +484,7 @@
             h('span',{style:{fontSize:10,opacity:.6,marginLeft:2}},menuOpen?'▲':'▼')
           ),
           h('div',{style:{marginLeft:10,background:group.color,borderRadius:20,padding:'4px 12px',fontSize:12,fontWeight:700,color:'#fff'}},group.label),
-          saving&&h('span',{style:{marginLeft:'auto',fontSize:10,color:'rgba(255,255,255,.35)'}},'Sauvegarde…'),
+          h('span',{style:{marginLeft:'auto',fontSize:10,color:saving?'rgba(255,255,255,.45)':saveErr?'#e67e22':'#4caf50',fontWeight:600,transition:'color .3s'}},saving?'💾 Sauvegarde…':saveErr?'⚠ Erreur sync':'✓ Sauvegardé'),
           menuOpen&&h(React.Fragment,null,
             h('div',{onClick:()=>setMenuOpen(false),style:{position:'fixed',inset:0,zIndex:40}}),
             h('div',{style:{position:'absolute',top:48,left:14,zIndex:50,background:'#0d2d4a',borderRadius:14,overflow:'hidden',boxShadow:'0 8px 32px rgba(0,0,0,.4)',border:'1px solid rgba(255,255,255,.1)',minWidth:180}},
