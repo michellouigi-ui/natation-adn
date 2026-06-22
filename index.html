@@ -374,7 +374,7 @@
       const [menuOpen,setMenuOpen]=useState(false);
       const [loaded,setLoaded]=useState(false);
       const [saving,setSaving]=useState(false);
-      const [saveErr,setSaveErr]=useState(false);
+      const [saveErr,setSaveErr]=useState(null);
       const saveTimer=useRef(null);
       const pendingSaves=useRef({});
       const group=GROUPES[activeGroup];
@@ -425,7 +425,7 @@
         const key=`${groupeId}::${semaineIndex}`;
         pendingSaves.current[key]={Groupe_id:groupeId,Semaine_index:semaineIndex,Data:weekData};
         setSaving(true);
-        setSaveErr(false);
+        setSaveErr(null);
         clearTimeout(saveTimer.current);
         saveTimer.current=setTimeout(async()=>{
           const rows=Object.values(pendingSaves.current);
@@ -433,7 +433,11 @@
           try {
             const {error}=await supabase.from('Saison_data').upsert(rows,{onConflict:'Groupe_id,Semaine_index'});
             if(error) throw error;
-          } catch(e){ console.error('Supabase sync error:',e); setSaveErr(true); }
+          } catch(e){
+            const msg=e?.message||e?.code||JSON.stringify(e);
+            console.error('Supabase sync error:',msg);
+            setSaveErr(msg);
+          }
           setSaving(false);
         },1500);
       },[]);
@@ -484,7 +488,7 @@
             h('span',{style:{fontSize:10,opacity:.6,marginLeft:2}},menuOpen?'▲':'▼')
           ),
           h('div',{style:{marginLeft:10,background:group.color,borderRadius:20,padding:'4px 12px',fontSize:12,fontWeight:700,color:'#fff'}},group.label),
-          h('span',{style:{marginLeft:'auto',fontSize:10,color:saving?'rgba(255,255,255,.45)':saveErr?'#e67e22':'#4caf50',fontWeight:600,transition:'color .3s'}},saving?'💾 Sauvegarde…':saveErr?'⚠ Erreur sync':'✓ Sauvegardé'),
+          h('span',{title:saveErr||'',style:{marginLeft:'auto',fontSize:10,color:saving?'rgba(255,255,255,.45)':saveErr?'#e67e22':'#4caf50',fontWeight:600,transition:'color .3s',cursor:saveErr?'help':'default',maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},saving?'💾 Sauvegarde…':saveErr?`⚠ ${saveErr}`:'✓ Sauvegardé'),
           menuOpen&&h(React.Fragment,null,
             h('div',{onClick:()=>setMenuOpen(false),style:{position:'fixed',inset:0,zIndex:40}}),
             h('div',{style:{position:'absolute',top:48,left:14,zIndex:50,background:'#0d2d4a',borderRadius:14,overflow:'hidden',boxShadow:'0 8px 32px rgba(0,0,0,.4)',border:'1px solid rgba(255,255,255,.1)',minWidth:180}},
